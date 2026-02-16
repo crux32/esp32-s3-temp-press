@@ -102,8 +102,8 @@ async fn main(spawner: Spawner) -> ! {
 
     spawner
         .spawn(read_temp_press(
-            peripherals.GPIO40.into(),
-            peripherals.GPIO41.into(),
+            peripherals.GPIO21.into(),
+            peripherals.GPIO20.into(),
             peripherals.I2C0.into(),
             true,
         ))
