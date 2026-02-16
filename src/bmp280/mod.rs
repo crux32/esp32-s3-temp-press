@@ -2,6 +2,7 @@ pub mod calibration;
 pub mod config;
 pub mod registers;
 
+use defmt::info;
 use esp_hal::{
     Blocking,
     delay::Delay,
@@ -30,6 +31,8 @@ pub enum Bmp280Error {
     SetConfFailed,
     /// Failed to write measurement control register (0xF4)
     SetMeasConfFailed,
+    /// Failed to bulk read starting from register (0xF7)
+    ReadFailed,
 }
 
 /// BMP280 driver instance (blocking I²C mode).
@@ -80,15 +83,17 @@ impl<'d> Bmp280<'d> {
     /// Returns `Bmp280Error` on any I²C failure or chip ID mismatch.
     pub async fn init(&mut self) -> Result<(), Bmp280Error> {
         // Perform a soft-reset
-        let reset_result: Result<(), esp_hal::i2c::master::Error> = self.i2c.write(
-            self.haddr,
-            // This trick is possible ONLY for the reset sequence!
-            &Bmp280Config::make_reg_val(&mut Bmp280Config::default(), config::RegValType::Reset),
-        );
+        let mut cfg = Bmp280Config::default();
+        let reset_cmd = cfg.make_reg_val(config::RegValType::Reset);
+        let reset_result: Result<(), esp_hal::i2c::master::Error> =
+            self.i2c.write(self.haddr, &reset_cmd);
 
         // Wait on success
         match reset_result {
-            Err(_) => return Err(Bmp280Error::ResetFailed),
+            Err(_) => {
+                info!("Failed to perform soft reset");
+                return Err(Bmp280Error::ResetFailed);
+            }
             _ => self.delay.delay_millis(10),
         }
 
@@ -98,10 +103,16 @@ impl<'d> Bmp280<'d> {
             self.i2c
                 .write_read(self.haddr, &[Bmp280Register::Id as u8], &mut chip_id);
         match chip_id_result {
-            Err(_) => return Err(Bmp280Error::ReadChipIdFailed),
+            Err(_) => {
+                info!("Failed to read cheap ID");
+                return Err(Bmp280Error::ReadChipIdFailed);
+            }
             _ => {
                 if chip_id[0] != BMP280_CHIP_ID {
-                    return Err(Bmp280Error::ReadChipIdMismatch);
+                    {
+                        info!("Chip ID mismatch");
+                        return Err(Bmp280Error::ReadChipIdMismatch);
+                    };
                 }
             }
         }
@@ -109,7 +120,10 @@ impl<'d> Bmp280<'d> {
         // Read calibration data
         let calib_read_result: Result<(), Bmp280Error> = Bmp280Calib::read_calib_data(self);
         match calib_read_result {
-            Err(e) => return Err(e),
+            Err(e) => {
+                info!("Failed to read calibration data");
+                return Err(e);
+            }
             _ => (),
         }
 
@@ -123,7 +137,10 @@ impl<'d> Bmp280<'d> {
             &bmp280_config.make_reg_val(config::RegValType::Config),
         );
         match config_result {
-            Err(_) => return Err(Bmp280Error::SetConfFailed),
+            Err(_) => {
+                info!("Failed to set configuration setting");
+                return Err(Bmp280Error::SetConfFailed);
+            }
             _ => (),
         }
         let config_meas = self.i2c.write(
@@ -131,10 +148,47 @@ impl<'d> Bmp280<'d> {
             &bmp280_config.make_reg_val(config::RegValType::Measurement),
         );
         match config_meas {
-            Err(_) => return Err(Bmp280Error::SetMeasConfFailed),
+            Err(_) => {
+                info!("Failed to set measurement setting");
+                return Err(Bmp280Error::SetMeasConfFailed);
+            }
             _ => (),
         }
 
         Ok(())
+    }
+
+    pub fn read_raw(&mut self) -> Result<[u8; 6], Bmp280Error> {
+        let mut raw_data: [u8; 6] = [0; 6];
+        let read_result: Result<(), esp_hal::i2c::master::Error> =
+            self.i2c
+                .write_read(self.haddr, &[Bmp280Register::PressMsb as u8], &mut raw_data);
+
+        match read_result {
+            Err(e) => {
+                info!("Read failed: {:?}", e);
+                return Err(Bmp280Error::ReadFailed);
+            }
+            _ => return Ok(raw_data),
+        }
+    }
+
+    pub fn read_data(&mut self) -> Result<[i32; 2], Bmp280Error> {
+        let raw_data: Result<[u8; 6], Bmp280Error> = self.read_raw();
+        match raw_data {
+            Err(e) => return Err(e),
+            Ok(raw) => {
+                info!("Raw data: {:?}", raw);
+                // Convert readings to 32 bit
+                let adc_t: i32 =
+                    (raw[3] as i32) << 12 | (raw[4] as i32) << 4 | (raw[5] as i32) >> 4;
+                let adc_p: i32 =
+                    (raw[0] as i32) << 12 | (raw[1] as i32) << 4 | (raw[2] as i32) >> 4;
+
+                let temp: i32 = Bmp280Calib::bmp280_compensate_t_i32(adc_t, self);
+                let press: i32 = Bmp280Calib::bmp280_compensate_p_i32(adc_p, &temp, self);
+                return Ok([temp, press]);
+            }
+        }
     }
 }

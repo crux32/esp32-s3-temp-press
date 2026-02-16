@@ -97,13 +97,11 @@ async fn main(spawner: Spawner) -> ! {
         .spawn(esp32s3_temp_press::wifi::net_runner(network_runner))
         .ok();
 
-    // Start reading DHT11
-
     // IP address
     esp32s3_temp_press::wifi::get_ip_addr(network_stack).await;
 
     spawner
-        .spawn(read_temp_humidity(
+        .spawn(read_temp_press(
             peripherals.GPIO40.into(),
             peripherals.GPIO41.into(),
             peripherals.I2C0.into(),
@@ -116,16 +114,24 @@ async fn main(spawner: Spawner) -> ! {
     }
 }
 
-/// Will read DHT11 sensor each 5 seconds
 #[embassy_executor::task]
-async fn read_temp_humidity(
+async fn read_temp_press(
     sda_pin: AnyPin<'static>,
     scl_pin: AnyPin<'static>,
     i2c: AnyI2c<'static>,
     sdo_gnd: bool,
 ) {
-    info!("'read_temp_humidity' has been started");
+    info!("'read_temp_press' has been started");
     let mut device: Bmp280<'_> = Bmp280::new(sda_pin, scl_pin, i2c, sdo_gnd);
     let _ = device.init().await;
     info!("BMP280 has been initialized");
+    loop {
+        Timer::after_secs(3).await;
+        let read_result: Result<[i32; 2], esp32s3_temp_press::bmp280::Bmp280Error> =
+            device.read_data();
+        match read_result {
+            Err(_) => info!("Error occured"),
+            Ok(res) => info!("T={:?}, P={:?}", res[0], res[1]),
+        }
+    }
 }
