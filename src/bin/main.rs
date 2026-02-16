@@ -144,7 +144,6 @@ async fn read_temp_press(
         }
         _ => (),
     }
-    info!("BMP280 has been initialized");
     loop {
         Timer::after_secs(3).await;
         let read_result: Result<[i32; 2], esp32s3_temp_press::bmp280::Bmp280Error> =

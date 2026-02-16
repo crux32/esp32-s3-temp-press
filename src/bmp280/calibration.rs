@@ -97,30 +97,27 @@ impl Bmp280Calib {
     ///
     /// Returns pressure in Pa (e.g. 101325 = 1013.25 hPa at sea level).
     pub fn bmp280_compensate_p_i32(adc_p: i32, t_fine: &i32, device: &mut Bmp280) -> i32 {
-        let mut var1 = (*t_fine >> 1) - 64000;
-        let mut var2 = ((var1 >> 2) * (var1 >> 2) >> 11) * (device.calib.dig_p6 as i32);
-        var2 += (var1 * (device.calib.dig_p5 as i32)) << 1;
+        let mut var1: i32 = (t_fine >> 1) - 64000;
+        let mut var2: i32 = ((var1 >> 2) * (var1 >> 2) >> 11) * device.calib.dig_p6 as i32;
+        var2 = var2 + ((var1 * device.calib.dig_p5 as i32) << 1);
         var2 = (var2 >> 2) + ((device.calib.dig_p4 as i32) << 16);
-        var1 = (((device.calib.dig_p3 as i32) * (((var1 >> 2) * (var1 >> 2)) >> 13)) >> 3)
-            + (((device.calib.dig_p2 as i32) * var1) >> 1);
-        var1 = (var1 >> 18) + ((device.calib.dig_p1 as i32) << 5);
-
+        var1 = ((((device.calib.dig_p3 as i32) * (((var1 >> 2) * (var1 >> 2)) >> 13)) >> 3)
+            + (((device.calib.dig_p2 as i32) * var1) >> 1))
+            >> 18;
+        var1 = (32768 + var1) * (device.calib.dig_p1 as i32 >> 15);
         if var1 == 0 {
-            return 0; // avoid division by zero
+            return 0;
         }
-
-        let mut p = ((1048576 - adc_p) - (var2 >> 12)) * 3125;
+        let mut p: i32 = ((1048576 - adc_p) - (var2 >> 12)) * 3125;
 
         if p < 0x80000000u32 as i32 {
             p = (p << 1) / var1;
         } else {
             p = (p / var1) * 2;
         }
-
         var1 = ((device.calib.dig_p9 as i32) * (((p >> 3) * (p >> 3)) >> 13)) >> 12;
         var2 = (p >> 2) * ((device.calib.dig_p8 as i32) >> 13);
-        p += (var1 + var2 + (device.calib.dig_p7 as i32)) >> 4;
-
+        p = p + ((var1 + var2 + (device.calib.dig_p7 as i32)) >> 4);
         p
     }
 }

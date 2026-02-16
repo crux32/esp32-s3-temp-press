@@ -141,7 +141,7 @@ impl<'d> Bmp280<'d> {
         // Load calibration coefficients
         calibration::Bmp280Calib::read_calib_data(self)?;
 
-        info!("BMP280 initialized successfully (ID=0x58)");
+        info!("BMP280 initialized successfully");
         Ok(())
     }
 
