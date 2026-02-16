@@ -79,11 +79,10 @@ impl<'d> Bmp280<'d> {
     /// 2. Wait ~10 ms
     /// 3. Verify chip ID (0xD0 == 0x58)
     /// 4. Read calibration coefficients
-    /// 5. Apply default HHDeviceDyn preset configuration (Normal mode, strong IIR, 1 s standby)
     ///
     /// # Errors
     /// Returns `Bmp280Error` on any I²C failure or chip ID mismatch.
-    pub async fn init(&mut self) -> Result<(), Bmp280Error> {
+    pub fn init(&mut self) -> Result<(), Bmp280Error> {
         // Perform a soft-reset
         let mut cfg = Bmp280Config::default();
         let reset_cmd = cfg.make_reg_val(config::RegValType::Reset);
@@ -126,14 +125,11 @@ impl<'d> Bmp280<'d> {
                 info!("Failed to read calibration data");
                 return Err(e);
             }
-            _ => (),
+            _ => Ok(()),
         }
+    }
 
-        // Configure
-        let mut bmp280_config: Bmp280Config = Bmp280Config::default_with_preset(
-            config::Bmp280ConfigPreset::HHDeviceDyn,
-            config::StdByTime::StdBy1000,
-        );
+    pub fn with_config(&mut self, mut bmp280_config: Bmp280Config) -> Result<(), Bmp280Error> {
         let config_result = self.i2c.write(
             self.haddr,
             &bmp280_config.make_reg_val(config::RegValType::Config),
@@ -156,7 +152,6 @@ impl<'d> Bmp280<'d> {
             }
             _ => (),
         }
-
         Ok(())
     }
 

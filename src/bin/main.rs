@@ -15,7 +15,8 @@ use esp_hal::gpio::AnyPin;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{clock::CpuClock, i2c::master::AnyI2c};
 use esp_println as _;
-use esp32s3_temp_press::bmp280::Bmp280;
+use esp32s3_temp_press::bmp280::config::{Bmp280Config, Bmp280ConfigPreset};
+use esp32s3_temp_press::bmp280::{self, Bmp280};
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -123,7 +124,26 @@ async fn read_temp_press(
 ) {
     info!("'read_temp_press' has been started");
     let mut device: Bmp280<'_> = Bmp280::new(sda_pin, scl_pin, i2c, sdo_gnd);
-    let _ = device.init().await;
+
+    // Initialization
+    let init_result = device.init();
+    match init_result {
+        Err(_) => info!("Initialization failed!"),
+        _ => (),
+    }
+
+    // Set configuration
+    let device_cfg: Bmp280Config = Bmp280Config::default_with_preset(
+        Bmp280ConfigPreset::Elevator,
+        bmp280::config::StdByTime::StdBy500,
+    );
+    let set_conf_result: Result<(), bmp280::Bmp280Error> = device.with_config(device_cfg);
+    match set_conf_result {
+        Err(_) => {
+            info!("Set config failed");
+        }
+        _ => (),
+    }
     info!("BMP280 has been initialized");
     loop {
         Timer::after_secs(3).await;
