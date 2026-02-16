@@ -58,7 +58,7 @@ impl Bmp280Calib {
             * (device.calib.dig_t3 as i32))
             >> 14;
 
-        let t_fine = var1 + var2;
+        let t_fine: i32 = var1 + var2;
         let t: i32 = (t_fine * 5 + 128) >> 8;
         return [t_fine, t];
     }

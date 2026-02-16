@@ -134,8 +134,8 @@ async fn read_temp_press(
 
     // Set configuration
     let device_cfg: Bmp280Config = Bmp280Config::default_with_preset(
-        Bmp280ConfigPreset::Elevator,
-        bmp280::config::StdByTime::StdBy500,
+        Bmp280ConfigPreset::HHDeviceDyn,
+        bmp280::config::StdByTime::StdBy625,
     );
     let set_conf_result: Result<(), bmp280::Bmp280Error> = device.with_config(device_cfg);
     match set_conf_result {
