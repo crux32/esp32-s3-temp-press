@@ -8,6 +8,7 @@ use esp_hal::{
     delay::Delay,
     gpio::AnyPin,
     i2c::master::{AnyI2c, Config, I2c},
+    time::Rate,
 };
 
 use crate::bmp280::{
@@ -58,7 +59,8 @@ impl<'d> Bmp280<'d> {
     /// * `i2c` - AnyI2c peripheral instance
     /// * `sdo_gnd` - `true` if SDO pin is connected to GND (address 0x76), `false` otherwise (0x77)
     pub fn new(sda_pin: AnyPin<'d>, scl_pin: AnyPin<'d>, i2c: AnyI2c<'d>, sdo_gnd: bool) -> Self {
-        let i2c_interface: I2c<'_, esp_hal::Blocking> = I2c::new(i2c, Config::default())
+        let cfg = Config::default().with_frequency(Rate::from_khz(100));
+        let i2c_interface: I2c<'_, esp_hal::Blocking> = I2c::new(i2c, cfg)
             .unwrap()
             .with_sda(sda_pin)
             .with_scl(scl_pin);
@@ -178,16 +180,15 @@ impl<'d> Bmp280<'d> {
         match raw_data {
             Err(e) => return Err(e),
             Ok(raw) => {
-                info!("Raw data: {:?}", raw);
                 // Convert readings to 32 bit
                 let adc_t: i32 =
                     (raw[3] as i32) << 12 | (raw[4] as i32) << 4 | (raw[5] as i32) >> 4;
                 let adc_p: i32 =
                     (raw[0] as i32) << 12 | (raw[1] as i32) << 4 | (raw[2] as i32) >> 4;
 
-                let temp: i32 = Bmp280Calib::bmp280_compensate_t_i32(adc_t, self);
-                let press: i32 = Bmp280Calib::bmp280_compensate_p_i32(adc_p, &temp, self);
-                return Ok([temp, press]);
+                let temp: [i32; 2] = Bmp280Calib::bmp280_compensate_t_i32(adc_t, self);
+                let press: i32 = Bmp280Calib::bmp280_compensate_p_i32(adc_p, &temp[0], self);
+                return Ok([temp[1], press]);
             }
         }
     }
