@@ -28,6 +28,7 @@ pub async fn wifi_connection(
         if !matches!(wifi_controller.is_started(), Ok(true)) {
             let client_config = ModeConfig::Client(
                 ClientConfig::default()
+                    // Add WiFi SSID and password here
                     .with_ssid("".into())
                     .with_password("".into()),
             );
