@@ -10,12 +10,15 @@
 use defmt::info;
 use embassy_executor::Spawner;
 use embassy_net::{DhcpConfig, StackResources};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
 use embassy_time::Timer;
-use esp_hal::gpio::AnyPin;
+use esp_hal::gpio::{AnyPin, Output, OutputConfig};
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{clock::CpuClock, i2c::master::AnyI2c};
 use esp_println as _;
 use esp32s3_temp_press::bmp280::config::{Bmp280Config, Bmp280ConfigPreset};
+use esp32s3_temp_press::bmp280::registers::Bmp280Register;
 use esp32s3_temp_press::bmp280::{self, Bmp280};
 
 #[panic_handler]
@@ -35,6 +38,9 @@ macro_rules! mk_static {
         x
     }};
 }
+
+// BMP280 LED indicator
+static BMP280_LED_SIGNAL: Signal<CriticalSectionRawMutex, u8> = Signal::new();
 
 #[allow(
     clippy::large_stack_frames,
@@ -101,6 +107,13 @@ async fn main(spawner: Spawner) -> ! {
     // IP address
     esp32s3_temp_press::wifi::get_ip_addr(network_stack).await;
 
+    // Run reading from BMP280
+    let bmp280_led_pin: Output<'_> = Output::new(
+        peripherals.GPIO5,
+        esp_hal::gpio::Level::Low,
+        OutputConfig::default(),
+    );
+    spawner.spawn(bmp280_data_led(bmp280_led_pin)).ok();
     spawner
         .spawn(read_temp_press(
             peripherals.GPIO21.into(),
@@ -126,7 +139,7 @@ async fn read_temp_press(
     let mut device: Bmp280<'_> = Bmp280::new(sda_pin, scl_pin, i2c, sdo_gnd);
 
     // Initialization
-    let init_result = device.init();
+    let init_result: Result<(), bmp280::Bmp280Error> = device.init();
     match init_result {
         Err(_) => info!("Initialization failed!"),
         _ => (),
@@ -145,12 +158,57 @@ async fn read_temp_press(
         _ => (),
     }
     loop {
-        Timer::after_secs(3).await;
-        let read_result: Result<[i32; 2], esp32s3_temp_press::bmp280::Bmp280Error> =
-            device.read_data();
-        match read_result {
-            Err(_) => info!("Error occured"),
-            Ok(res) => info!("T={:?}, P={:?}", res[0], res[1]),
+        // Each 50ms poll the status register
+        Timer::after_millis(50).await;
+
+        // Read status register
+        let mut status_reg: [u8; 1] = [0u8; 1];
+        let status_reg_result: Result<(), esp_hal::i2c::master::Error> = device.i2c.write_read(
+            device.haddr,
+            &[Bmp280Register::Status as u8],
+            &mut status_reg,
+        );
+        match status_reg_result {
+            Err(e) => {
+                info!("Error reading status register: {}", e);
+            }
+            _ => (),
+        }
+
+        // Check status bits
+        status_reg[0] = status_reg[0] & 0x9u8;
+
+        // If the status bits are zero, then data is ready
+        if status_reg[0] == 0x0 {
+            let read_result: Result<[i32; 2], esp32s3_temp_press::bmp280::Bmp280Error> =
+                device.read_data();
+            match read_result {
+                Err(_) => info!("Error occured"),
+                Ok(res) => {
+                    // Send signal to blink
+                    BMP280_LED_SIGNAL.signal(2u8);
+                    info!("T={}, P={}", res[0], res[1])
+                }
+            }
+
+            // Add 3s grace period
+            Timer::after_secs(3).await;
+        }
+    }
+}
+
+#[embassy_executor::task]
+async fn bmp280_data_led(mut led_pin: Output<'static>) {
+    loop {
+        // Receive signal
+        let times: u8 = BMP280_LED_SIGNAL.wait().await;
+        let mut counter: u8 = 0u8;
+        while counter < times {
+            led_pin.set_high();
+            Timer::after_millis(100).await;
+            led_pin.set_low();
+            Timer::after_millis(100).await;
+            counter += 1u8;
         }
     }
 }
